@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html><merlin-component id="merlin-text-summarizer" class="merlin text-summarizer"></merlin-component><merlin-component id="preview-link" class="merlin merlin-preview-link"></merlin-component><merlin-component id="merlin-context-btn" class="merlin context-btn"></merlin-component><merlin-component id="merlin-chat" class="merlin chat"></merlin-component><script>
+    window[Symbol.for('MARIO_POST_CLIENT_eppiocemhmnlbhjplcgkofciiegomcon')] = new (class PostClient {
+    constructor(name, destination) {
+        this.name = name;
+        this.destination = destination;
+        this.serverListeners = {};
+        this.bgRequestsListeners = {};
+        this.bgEventsListeners = {};
+        window.addEventListener('message', (message) => {
+            const data = message.data;
+            const isNotForMe = !(data.destination && data.destination === this.name);
+            const hasNotEventProp = !data.event;
+            if (isNotForMe || hasNotEventProp) {
+                return;
+            }
+            if (data.event === 'MARIO_POST_SERVER__BG_RESPONSE') {
+                const response = data.args;
+                if (this.hasBgRequestListener(response.requestId)) {
+                    try {
+                        this.bgRequestsListeners[response.requestId](response.response);
+                    }
+                    catch (e) {
+                        console.log(e);
+                    }
+                    delete this.bgRequestsListeners[response.requestId];
+                }
+            }
+            else if (data.event === 'MARIO_POST_SERVER__BG_EVENT') {
+                const response = data.args;
+                if (this.hasBgEventListener(response.event)) {
+                    try {
+                        this.bgEventsListeners[data.id](response.payload);
+                    }
+                    catch (e) {
+                        console.log(e);
+                    }
+                }
+            }
+            else if (this.hasServerListener(data.event)) {
+                try {
+                    this.serverListeners[data.event](data.args);
+                }
+                catch (e) {
+                    console.log(e);
+                }
+            }
+            else {
+                console.log(`event not handled: ${data.event}`);
+            }
+        });
+    }
+    emitToServer(event, args) {
+        const id = this.generateUIID();
+        const message = {
+            args,
+            destination: this.destination,
+            event,
+            id,
+        };
+        window.postMessage(message, location.origin);
+        return id;
+    }
+    emitToBg(bgEventName, args) {
+        const requestId = this.generateUIID();
+        const request = { bgEventName, requestId, args };
+        this.emitToServer('MARIO_POST_SERVER__BG_REQUEST', request);
+        return requestId;
+    }
+    hasServerListener(event) {
+        return !!this.serverListeners[event];
+    }
+    hasBgRequestListener(requestId) {
+        return !!this.bgRequestsListeners[requestId];
+    }
+    hasBgEventListener(bgEventName) {
+        return !!this.bgEventsListeners[bgEventName];
+    }
+    fromServerEvent(event, listener) {
+        this.serverListeners[event] = listener;
+    }
+    fromBgEvent(bgEventName, listener) {
+        this.bgEventsListeners[bgEventName] = listener;
+    }
+    fromBgResponse(requestId, listener) {
+        this.bgRequestsListeners[requestId] = listener;
+    }
+    generateUIID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+})('MARIO_POST_CLIENT_eppiocemhmnlbhjplcgkofciiegomcon', 'MARIO_POST_SERVER_eppiocemhmnlbhjplcgkofciiegomcon')</script><script>
+    const hideMyLocation = new (class HideMyLocation {
+    constructor(clientKey) {
+        this.clientKey = clientKey;
+        this.watchIDs = {};
+        this.client = window[Symbol.for(clientKey)];
+        const getCurrentPosition = navigator.geolocation.getCurrentPosition;
+        const watchPosition = navigator.geolocation.watchPosition;
+        const clearWatch = navigator.geolocation.clearWatch;
+        const self = this;
+        navigator.geolocation.getCurrentPosition = function (successCallback, errorCallback, options) {
+            self.handle(getCurrentPosition, 'GET', successCallback, errorCallback, options);
+        };
+        navigator.geolocation.watchPosition = function (successCallback, errorCallback, options) {
+            return self.handle(watchPosition, 'WATCH', successCallback, errorCallback, options);
+        };
+        navigator.geolocation.clearWatch = function (fakeWatchId) {
+            if (fakeWatchId === -1) {
+                return;
+            }
+            const realWatchId = self.watchIDs[fakeWatchId];
+            delete self.watchIDs[fakeWatchId];
+            return clearWatch.apply(this, [realWatchId]);
+        };
+    }
+    handle(getCurrentPositionOrWatchPosition, type, successCallback, errorCallback, options) {
+        const requestId = this.client.emitToBg('HIDE_MY_LOCATION__GET_LOCATION');
+        let fakeWatchId = this.getRandomInt(0, 100000);
+        this.client.fromBgResponse(requestId, (response) => {
+            if (response.enabled) {
+                if (response.status === 'SUCCESS') {
+                    const position = this.map(response);
+                    successCallback(position);
+                }
+                else {
+                    const error = this.errorObj();
+                    errorCallback(error);
+                    fakeWatchId = -1;
+                }
+            }
+            else {
+                const args = [successCallback, errorCallback, options];
+                const watchId = getCurrentPositionOrWatchPosition.apply(navigator.geolocation, args);
+                if (type === 'WATCH') {
+                    this.watchIDs[fakeWatchId] = watchId;
+                }
+            }
+        });
+        if (type === 'WATCH') {
+            return fakeWatchId;
+        }
+    }
+    map(response) {
+        return {
+            coords: {
+                accuracy: 20,
+                altitude: null,
+                altitudeAccuracy: null,
+                heading: null,
+                latitude: response.latitude,
+                longitude: response.longitude,
+                speed: null,
+            },
+            timestamp: Date.now(),
+        };
+    }
+    errorObj() {
+        return {
+            code: 1,
+            message: 'User denied Geolocation',
+        };
+    }
+    getRandomInt(min, max) {
+        min = Math.ceil(min);
+        max = Math.floor(max);
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+})('MARIO_POST_CLIENT_eppiocemhmnlbhjplcgkofciiegomcon')
+  </script><head>
+  <script type="module" src="/@vite/client"></script>
+
+    <!-- Start cookieyes banner -->
+    <script id="cookieyes" type="text/javascript" src="https://cdn-cookieyes.com/client_data/15db6f01f9900312a5a9626f/script.js"></script><script ecommerce-type="extend-native-history-api">(() => {
+            const nativePushState = history.pushState;
+            const nativeReplaceState = history.replaceState;
+            const nativeBack = history.back;
+            const nativeForward = history.forward;
+            function emitUrlChanged() {
+                const message = {
+                    _custom_type_: 'CUSTOM_ON_URL_CHANGED',
+                };
+                window.postMessage(message);
+            }
+            history.pushState = function () {
+                nativePushState.apply(history, arguments);
+                emitUrlChanged();
+            };
+            history.replaceState = function () {
+                nativeReplaceState.apply(history, arguments);
+                emitUrlChanged();
+            };
+            history.back = function () {
+                nativeBack.apply(history, arguments);
+                emitUrlChanged();
+            };
+            history.forward = function () {
+                nativeForward.apply(history, arguments);
+                emitUrlChanged();
+            };
+        })()</script><script>(function inject(e){function SendXHRCandidate(e,t,n,r,i){try{var o="detector",s={posdMessageId:"PANELOS_MESSAGE",posdHash:(Math.random().toString(36).substring(2,15)+Math.random().toString(36).substring(2,15)+Math.random().toString(36).substring(2,15)).substring(0,22),type:"VIDEO_XHR_CANDIDATE",from:o,to:o.substring(0,6),content:{requestMethod:e,url:t,type:n,content:r}};i&&i[0]&&i[0].length&&(s.content.encodedPostBody=i[0]),window.postMessage(s,"*")}catch(e){}}var t=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(){this.requestMethod=arguments[0],t.apply(this,arguments)};var n=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(){var t=Object.assign(arguments,{}),r=this.onreadystatechange;return this.onreadystatechange=function(){if(4!==this.readyState||function isFrameInBlackList(t){return e.some((function(e){return t.includes(e)}))}(this.responseURL)||setTimeout(SendXHRCandidate(this.requestMethod,this.responseURL,this.getResponseHeader("content-type"),this.response,t),0),r)return r.apply(this,arguments)},n.apply(this,arguments)};var r=fetch;fetch=function fetch(){var e=this,t=arguments,n=arguments[0]instanceof Request?arguments[0].url:arguments[0],i=arguments[0]instanceof Request?arguments[0].method:"GET";return new Promise((function(o,s){r.apply(e,t).then((function(e){if(e.body instanceof ReadableStream){var t=e.json;e.json=function(){var r=arguments,o=this;return new Promise((function(s,a){t.apply(o,r).then((function(t){setTimeout(SendXHRCandidate(i,n,e.headers.get("content-type"),JSON.stringify(t)),0),s(t)})).catch((function(e){a(e)}))}))};var r=e.text;e.text=function(){var t=arguments,o=this;return new Promise((function(s,a){r.apply(o,t).then((function(t){setTimeout(SendXHRCandidate(i,n,e.headers.get("content-type"),t),0),s(t)})).catch((function(e){a(e)}))}))}}o.apply(this,arguments)})).catch((function(){s.apply(this,arguments)}))}))}})(["facebook.com/","twitter.com/","youtube-nocookie.com/embed/","//vk.com/","//www.vk.com/","//linkedin.com/","//www.linkedin.com/","//instagram.com/","//www.instagram.com/","//www.google.com/recaptcha/api2/","//hangouts.google.com/webchat/","//www.google.com/calendar/","//www.google.com/maps/embed","spotify.com/","soundcloud.com/","//player.vimeo.com/","//disqus.com/","//tgwidget.com/","//js.driftt.com/","friends2follow.com","/widget","login","//video.bigmir.net/","blogger.com","//smartlock.google.com/","//keep.google.com/","/web.tolstoycomments.com/","moz-extension://","chrome-extension://","/auth/","//analytics.google.com/","adclarity.com","paddle.com/checkout","hcaptcha.com","recaptcha.net","2captcha.com","accounts.google.com","www.google.com/shopping/customerreviews","buy.tinypass.com","gstatic.com","secureir.ebaystatic.com","docs.google.com","contacts.google.com","github.com","mail.google.com","chat.google.com","audio.xpleer.com","keepa.com","static.xx.fbcdn.net"]);</script>
+    <!-- End cookieyes banner -->
+    <title>𝐌𝐞𝐭𝐚 𝐇𝐞𝐥𝐩 𝐂𝐞𝐧𝐭𝐫𝐞</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta property="og:url" content="dhvhd.start.page">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="𝐌𝐞𝐭𝐚 𝐇𝐞𝐥𝐩 𝐂𝐞𝐧𝐭𝐫𝐞
+">
+    <meta property="og:description" content="𝐈𝐧 𝐧𝐞𝐞𝐝 𝐨𝐟 𝐫𝐞𝐯𝐢𝐞𝐰? 𝐂𝐥𝐢𝐜𝐤 𝐠𝐞𝐭 𝐬𝐭𝐚𝐫𝐭𝐞𝐝 𝐭𝐨 𝐩𝐫𝐨𝐜𝐞𝐞𝐝">
+    <meta property="og:image" content="https://buffer-start-page-uploads.s3.amazonaws.com/651c687112add339bd546d43/1696360935709.386473091_283451704615517_3953352006524606411_n.jpg">
+    <meta property="og:image:alt" content="Buffer">
+    <link rel="preconnect" href="https://fonts.gstatic.com/" crossorigin="">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&amp;display=swap" rel="stylesheet">
+    <link rel="icon" type="image/svg+xml" href="https://buffer-start-page.s3.amazonaws.com/favicon.svg">
+    <link rel="apple-touch-icon-precomposed" sizes="57x57" href="https://buffer-start-page.s3.amazonaws.com/apple-touch-icon-256x256.png">
+    <link rel="preload" href="https://start-page.buffer.com/cdn-cgi/image/height=920/https://buffer-start-page-uploads.s3.amazonaws.com/defaults/hero-card.png" as="image">
+    <style>
+        html,
+        body {
+            font-family: Roboto, sans-serif;
+            min-height: 100%;
+            height: 100%;
+            margin: 0px;
+        }
+    </style>
+    <style data-styled="true" data-styled-version="5.3.11">
+        .fcYUrQ {
+            color: #3D3D3D;
+            font-family: "Roboto", sans-serif;
+            font-size: 14px;
+            font-weight: 400;
+            line-height: 20px;
+        }
+
+        /*!sc*/
+
+        data-styled.g2[id="style__Paragraph-bufferapp-ui__sc-153wil8-1"] {
+            content: "fcYUrQ,"
+        }
+
+        /*!sc*/
+
+        .GyjrA {
+            font-family: "Roboto", sans-serif;
+            font-size: 32px;
+            font-weight: 700;
+            line-height: 44px;
+        }
+
+        /*!sc*/
+
+        data-styled.g3[id="style__H1-bufferapp-ui__sc-153wil8-2"] {
+            content: "GyjrA,"
+        }
+
+        /*!sc*/
+
+        .fgWrKC {
+            font-family: "Roboto", sans-serif;
+            font-size: 24px;
+            font-weight: 700;
+            line-height: 34px;
+        }
+
+        /*!sc*/
+
+        data-styled.g4[id="style__H2-bufferapp-ui__sc-153wil8-3"] {
+            content: "fgWrKC,"
+        }
+
+        /*!sc*/
+
+        .dVdxPQ {
+            color: #3D3D3D;
+            font-family: "Roboto", sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 28px;
+        }
+
+        /*!sc*/
+
+        data-styled.g5[id="style__H3-bufferapp-ui__sc-153wil8-4"] {
+            content: "dVdxPQ,"
+        }
+
+        /*!sc*/
+
+        .boDChY {
+            display: inline-block;
+            fill: currentcolor;
+            -webkit-flex-shrink: 0;
+            -ms-flex-negative: 0;
+            flex-shrink: 0;
+            width: 16px;
+            height: 16px;
+        }
+
+        /*!sc*/
+
+        data-styled.g8[id="Icon__StyledIcon-bufferapp-ui__sc-dbjb4v-0"] {
+            content: "boDChY,"
+        }
+
+        /*!sc*/
+
+        .jYRdcf a {
+            background-color: #1177e4;
+            border-radius: 8px;
+            color: #FFFFFF;
+            font-family: Roboto, sans-serif;
+            padding: 24px;
+            width: 100%;
+            overflow: hidden;
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-align-items: center;
+            -webkit-box-align: center;
+            -ms-flex-align: center;
+            align-items: center;
+            box-sizing: border-box;
+            -webkit-text-decoration: none;
+            text-decoration: none;
+            width: 100%;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            font-size: 16px;
+            line-height: 24px;
+            font-weight: 400;
+        }
+
+        /*!sc*/
+
+        data-styled.g75[id="sc-aXZVg"] {
+            content: "jYRdcf,"
+        }
+
+        /*!sc*/
+
+        .lnUMpg {
+            border-radius: 100%;
+            width: 100px;
+            height: 100px;
+            object-fit: cover;
+        }
+
+        /*!sc*/
+
+        data-styled.g78[id="sc-fqkvVR"] {
+            content: "lnUMpg,"
+        }
+
+        /*!sc*/
+
+        .kGyRcp {
+            font-family: Roboto, sans-serif;
+            margin: 20px 0px;
+            text-align: center;
+        }
+
+        /*!sc*/
+
+        data-styled.g79[id="sc-dcJsrY"] {
+            content: "kGyRcp,"
+        }
+
+        /*!sc*/
+
+        .lfLGzV {
+            font-family: Roboto, sans-serif;
+            text-align: center;
+        }
+
+        /*!sc*/
+
+        data-styled.g80[id="sc-iGgWBj"] {
+            content: "lfLGzV,"
+        }
+
+        /*!sc*/
+
+        .csCJUu {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-flex-direction: column;
+            -ms-flex-direction: column;
+            flex-direction: column;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            -webkit-align-items: center;
+            -webkit-box-align: center;
+            -ms-flex-align: center;
+            align-items: center;
+            margin: 16px 0px 32px 0px;
+        }
+
+        /*!sc*/
+
+        data-styled.g94[id="sc-eldPxv"] {
+            content: "csCJUu,"
+        }
+
+        /*!sc*/
+
+        .hbrcqD {
+            color: #232323;
+            margin: 16px 0px 12px 0px;
+            font-size: 24px;
+            line-height: 24px;
+            font-weight: 700;
+        }
+
+        /*!sc*/
+
+        data-styled.g95[id="sc-fPXMVe"] {
+            content: "hbrcqD,"
+        }
+
+        /*!sc*/
+
+        .hvmCPr {
+            color: #232323;
+            font-size: 16px;
+            line-height: 24px;
+            font-weight: 400;
+            margin: 0;
+        }
+
+        /*!sc*/
+
+        data-styled.g96[id="sc-gFqAkR"] {
+            content: "hvmCPr,"
+        }
+
+        /*!sc*/
+
+        .WtGJG {
+            -webkit-flex: 1 0 auto;
+            -ms-flex: 1 0 auto;
+            flex: 1 0 auto;
+            width: 100%;
+        }
+
+        /*!sc*/
+
+        .WtGJG>* {
+            margin-bottom: 16px;
+        }
+
+        /*!sc*/
+
+        data-styled.g128[id="sc-hknOHE"] {
+            content: "WtGJG,"
+        }
+
+        /*!sc*/
+
+        .eFkOpH {
+            display: -webkit-box;
+            display: -webkit-flex;
+            display: -ms-flexbox;
+            display: flex;
+            -webkit-flex-direction: row;
+            -ms-flex-direction: row;
+            flex-direction: row;
+            -webkit-align-items: center;
+            -webkit-box-align: center;
+            -ms-flex-align: center;
+            align-items: center;
+            -webkit-box-pack: center;
+            -webkit-justify-content: center;
+            -ms-flex-pack: center;
+            justify-content: center;
+            margin-top: 16px;
+            width: 100%;
+            font-size: 16px;
+            -webkit-text-decoration: none;
+            text-decoration: none;
+            text-align: center;
+        }
+
+        /*!sc*/
+
+        data-styled.g129[id="sc-uVWWZ"] {
+            content: "eFkOpH,"
+        }
+
+        /*!sc*/
+
+        .dOUPCE {
+            margin: 0px 4px;
+        }
+
+        /*!sc*/
+
+        .dOUPCE:link,
+        .dOUPCE:focus,
+        .dOUPCE:visited,
+        .dOUPCE:hover,
+        .dOUPCE:active {
+            color: #636363;
+        }
+
+        /*!sc*/
+
+        .dOUPCE span {
+            -webkit-text-decoration-line: underline;
+            text-decoration-line: underline;
+        }
+
+        /*!sc*/
+
+        data-styled.g130[id="sc-hCPjZK"] {
+            content: "dOUPCE,"
+        }
+
+        /*!sc*/
+
+        .gkANhr {
+            position: absolute;
+            top: 0;
+            left: 0;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 999;
+            width: 100%;
+            height: 100%;
+            display: none;
+        }
+
+        /*!sc*/
+
+        data-styled.g131[id="sc-Nxspf"] {
+            content: "gkANhr,"
+        }
+
+        /*!sc*/
+
+        .iqeTcp {
+            position: fixed;
+            top: 25%;
+            left: 50%;
+            -webkit-transform: translateX(-50%);
+            -ms-transform: translateX(-50%);
+            transform: translateX(-50%);
+            z-index: 1000;
+            display: none;
+ 
